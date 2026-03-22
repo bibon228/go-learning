@@ -1,23 +1,26 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
+)
 
 type Product struct {
 	Name  string
 	Price int
 }
 
-func ApplyDiscount(p *Product, amount int) {
+var laptop = Product{Name: "MacBook", Price: 2000}
+
+func applyDiscount(p *Product, amount int) {
 	p.Price -= amount
 }
-func ChangeName(p *Product, newName string) {
-	p.Name = newName
+func handleDiscount(w http.ResponseWriter, r *http.Request) {
+	applyDiscount(&laptop, 100)
+	fmt.Fprintf(w, "Текущая цена: %d\n", laptop.Price)
 }
 func main() {
-	laptop := Product{Name: "Laptop", Price: 1000}
+	http.HandleFunc("/discount", handleDiscount)
+	http.ListenAndServe(":8080", nil)
 
-	ChangeName(&laptop, "Smartphone")
-	fmt.Println("Новое имя:", laptop.Name)
-	ApplyDiscount(&laptop, 100)
-	fmt.Println("Новая цена:", laptop.Price)
 }
