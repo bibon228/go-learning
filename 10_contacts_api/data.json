@@ -1,0 +1,12 @@
+{
+  "Ivan": {
+    "id": 1,
+    "name": "Ivan",
+    "phone": "111 "
+  },
+  "Maria": {
+    "id": 2,
+    "name": "Maria",
+    "phone": "222"
+  }
+}
