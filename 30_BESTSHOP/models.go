@@ -42,10 +42,12 @@ type BonusCards struct {
 type ShopRepository interface {
 	// РАБОТА С ЮЗЕРАМИ И БАНКОМ
 	CreateUser(name string) (int, error)
-	GetBankByUserId(userId int) (int, error) // Получить ID банка юзера
+	GetBankByUserId(userId int) (int, error)
 	GetBalance(bankId int, valute string) (int, error)
-	UpdateBalance(bankId int, delta int, valute string) error // delta может быть минусовым
+	UpdateBalance(bankId int, delta int, valute string) error
 	CreateBank(userId int) (int, error)
+	GetBankById(bankId int) (*Bank, error)
+	UpdateCardBank(cardId int, newBankId int) error
 
 	// КАРТЫ
 	CreateCard(bankId int, number string) (int, error)

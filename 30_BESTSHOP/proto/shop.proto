@@ -67,6 +67,15 @@ message GetOrderResponse {
   string message = 2;
   string order = 3;
 }
+message LinkCardRequest{
+  int32 user_id = 1;
+  int32 card_id =  2;
+}
+message LinkCardResponse{
+  bool success = 1;
+  string message = 2;
+} 
+
 
 service ShopService {
   rpc BuyProduct (BuyRequest) returns (BuyResponse);
@@ -75,6 +84,7 @@ service ShopService {
    rpc TopUp (TopUpRequest) returns (TopUpResponse);
    rpc BuyWithBonus (BuyWithBonusRequest) returns (BuyWithBonusResponse);
    rpc GetOrder (GetOrderRequest) returns (GetOrderResponse);
+   rpc LinkCard (LinkCardRequest) returns (LinkCardResponse);
 }
 
 

@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	shop "db/proto" // Импорт папки, где лежит сгенерированный код
+	shop "db/proto"
 	"fmt"
 	"log"
 	"math/rand"
 )
 
-// Мы создаем свою структуру, которая будет «играть роль» сервера
 type ShopServer struct {
 	shop.UnimplementedShopServiceServer
 	Repo ShopRepository
@@ -207,7 +206,6 @@ func (s *ShopServer) TopUp(ctx context.Context, req *shop.TopUpRequest) (*shop.T
 
 func (s *ShopServer) GetOrder(ctx context.Context, req *shop.GetOrderRequest) (*shop.GetOrderResponse, error) {
 	log.Printf("Пришёл запрос на получение заказа: UserID=%d", req.UserId)
-
 	order, err := s.Repo.GetOrder(int(req.UserId))
 	if err != nil {
 		return &shop.GetOrderResponse{Success: false, Message: "Заказ не найден"}, nil
@@ -216,5 +214,40 @@ func (s *ShopServer) GetOrder(ctx context.Context, req *shop.GetOrderRequest) (*
 		Success: true,
 		Message: "Заказ успешно получен!",
 		Order:   fmt.Sprintf("ID: %d, UserID: %d, ProductID: %d, Amount: %d, Price: %d, UsedBonuses: %d, Status: %s", order.ID, order.UserID, order.ProductID, order.Amount, order.Price, order.UsedBonuses, order.Status),
+	}, nil
+}
+func (s *ShopServer) LinkCard(ctx context.Context, req *shop.LinkCardRequest) (*shop.LinkCardResponse, error) {
+	log.Printf("Пришёл запрос на активацию карты: UserID=%d", req.UserId)
+	card, err := s.Repo.GetCard(int(req.CardId))
+	if err != nil {
+		return &shop.LinkCardResponse{Success: false, Message: "Не удалось найти карту"}, nil
+	}
+	oldBank, err := s.Repo.GetBankById(card.BankID)
+	if err != nil {
+		return &shop.LinkCardResponse{Success: false, Message: "Не удалось найти счет карты"}, nil
+	}
+
+	if oldBank.UserID != 0 {
+		return &shop.LinkCardResponse{Success: false, Message: "Карта уже привязана к другому пользователю!"}, nil
+	}
+	userBankID, err := s.Repo.GetBankByUserId(int(req.UserId))
+	if err != nil {
+		return &shop.LinkCardResponse{Success: false, Message: "Не удалось найти счет пользователя"}, nil
+	}
+	err = s.Repo.UpdateCardBank(int(req.CardId), userBankID)
+	if err != nil {
+		return &shop.LinkCardResponse{Success: false, Message: "Не удалось перепривязать карту"}, nil
+	}
+	if oldBank.BalanceRub > 0 {
+		s.Repo.UpdateBalance(userBankID, oldBank.BalanceRub, "RUB")
+		s.Repo.UpdateBalance(oldBank.ID, -oldBank.BalanceRub, "RUB")
+	}
+	if oldBank.BalanceUsd > 0 {
+		s.Repo.UpdateBalance(userBankID, oldBank.BalanceUsd, "USD")
+		s.Repo.UpdateBalance(oldBank.ID, -oldBank.BalanceUsd, "USD")
+	}
+	return &shop.LinkCardResponse{
+		Success: true,
+		Message: "Карта успешно активирована, баланс перенесен!",
 	}, nil
 }

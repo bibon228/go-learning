@@ -123,3 +123,21 @@ func (r *PostgresRepo) GetBalance(bankId int, valute string) (int, error) {
 	err := r.db.QueryRow(query, bankId).Scan(&balance)
 	return balance, err
 }
+func (r *PostgresRepo) UpdateCardBank(cardId int, newBankId int) error {
+	_, err := r.db.Exec("UPDATE cards SET bank_id = $1 WHERE id = $2", newBankId, cardId)
+	return err
+}
+func (r *PostgresRepo) GetBankById(bankId int) (*Bank, error) {
+	var bank Bank
+	var nullUserId sql.NullInt32 // Специальная переменная для NULL-значений
+	err := r.db.QueryRow("SELECT id, user_id, balance_rub, balance_usd FROM banks WHERE id = $1", bankId).Scan(&bank.ID, &nullUserId, &bank.BalanceRub, &bank.BalanceUsd)
+
+	// Если user_id в базе не NULL, достаем настоящую цифру:
+	if nullUserId.Valid {
+		bank.UserID = int(nullUserId.Int32)
+	} else {
+		bank.UserID = 0 // Если NULL, ставим 0
+	}
+
+	return &bank, err
+}

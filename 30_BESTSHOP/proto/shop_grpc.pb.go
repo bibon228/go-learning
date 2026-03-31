@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             (unknown)
-// source: shop.proto
+// source: proto/shop.proto
 
 package shop
 
@@ -25,6 +25,7 @@ const (
 	ShopService_TopUp_FullMethodName        = "/shop.ShopService/TopUp"
 	ShopService_BuyWithBonus_FullMethodName = "/shop.ShopService/BuyWithBonus"
 	ShopService_GetOrder_FullMethodName     = "/shop.ShopService/GetOrder"
+	ShopService_LinkCard_FullMethodName     = "/shop.ShopService/LinkCard"
 )
 
 // ShopServiceClient is the client API for ShopService service.
@@ -37,6 +38,7 @@ type ShopServiceClient interface {
 	TopUp(ctx context.Context, in *TopUpRequest, opts ...grpc.CallOption) (*TopUpResponse, error)
 	BuyWithBonus(ctx context.Context, in *BuyWithBonusRequest, opts ...grpc.CallOption) (*BuyWithBonusResponse, error)
 	GetOrder(ctx context.Context, in *GetOrderRequest, opts ...grpc.CallOption) (*GetOrderResponse, error)
+	LinkCard(ctx context.Context, in *LinkCardRequest, opts ...grpc.CallOption) (*LinkCardResponse, error)
 }
 
 type shopServiceClient struct {
@@ -107,6 +109,16 @@ func (c *shopServiceClient) GetOrder(ctx context.Context, in *GetOrderRequest, o
 	return out, nil
 }
 
+func (c *shopServiceClient) LinkCard(ctx context.Context, in *LinkCardRequest, opts ...grpc.CallOption) (*LinkCardResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LinkCardResponse)
+	err := c.cc.Invoke(ctx, ShopService_LinkCard_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ShopServiceServer is the server API for ShopService service.
 // All implementations must embed UnimplementedShopServiceServer
 // for forward compatibility.
@@ -117,6 +129,7 @@ type ShopServiceServer interface {
 	TopUp(context.Context, *TopUpRequest) (*TopUpResponse, error)
 	BuyWithBonus(context.Context, *BuyWithBonusRequest) (*BuyWithBonusResponse, error)
 	GetOrder(context.Context, *GetOrderRequest) (*GetOrderResponse, error)
+	LinkCard(context.Context, *LinkCardRequest) (*LinkCardResponse, error)
 	mustEmbedUnimplementedShopServiceServer()
 }
 
@@ -144,6 +157,9 @@ func (UnimplementedShopServiceServer) BuyWithBonus(context.Context, *BuyWithBonu
 }
 func (UnimplementedShopServiceServer) GetOrder(context.Context, *GetOrderRequest) (*GetOrderResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetOrder not implemented")
+}
+func (UnimplementedShopServiceServer) LinkCard(context.Context, *LinkCardRequest) (*LinkCardResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LinkCard not implemented")
 }
 func (UnimplementedShopServiceServer) mustEmbedUnimplementedShopServiceServer() {}
 func (UnimplementedShopServiceServer) testEmbeddedByValue()                     {}
@@ -274,6 +290,24 @@ func _ShopService_GetOrder_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ShopService_LinkCard_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LinkCardRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ShopServiceServer).LinkCard(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ShopService_LinkCard_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ShopServiceServer).LinkCard(ctx, req.(*LinkCardRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ShopService_ServiceDesc is the grpc.ServiceDesc for ShopService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -305,7 +339,11 @@ var ShopService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetOrder",
 			Handler:    _ShopService_GetOrder_Handler,
 		},
+		{
+			MethodName: "LinkCard",
+			Handler:    _ShopService_LinkCard_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "shop.proto",
+	Metadata: "proto/shop.proto",
 }
