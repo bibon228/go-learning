@@ -1,0 +1,81 @@
+syntax = "proto3";
+package shop;
+option go_package = "./proto;shop";
+
+message BuyRequest {
+  int32 user_id = 1;
+  int32 product_id = 2;
+  int32 amount = 3;
+}
+
+message BuyResponse {
+  bool success = 1;
+  string message = 2;
+  int32 new_balance = 3;
+}
+message CreateUserRequest {
+  string name = 1;
+}
+
+message CreateUserResponse {
+  bool success = 1;
+  string message = 2;
+  int32 user_id = 3;
+}
+
+message CreateCardRequest {
+  int32 user_id = 1;
+}
+
+message CreateCardResponse {
+  bool success = 1;
+  string message = 2;
+  int32 card_id = 3;
+  string number = 4;
+}
+
+message TopUpRequest {
+  int32 card_id = 1;
+  int32 amount = 2;
+  string valute = 3;
+}
+
+message TopUpResponse {
+  bool success = 1;
+  string message = 2;
+  int32 new_balance = 3;
+}
+
+
+message BuyWithBonusRequest {
+  int32 user_id = 1;
+  int32 product_id = 2;
+  int32 amount = 3;
+}
+
+message BuyWithBonusResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetOrderRequest {
+  int32 user_id = 1;
+}
+
+message GetOrderResponse {
+  bool success = 1;
+  string message = 2;
+  string order = 3;
+}
+
+service ShopService {
+  rpc BuyProduct (BuyRequest) returns (BuyResponse);
+   rpc CreateUser (CreateUserRequest) returns (CreateUserResponse);
+   rpc CreateCard (CreateCardRequest) returns (CreateCardResponse);
+   rpc TopUp (TopUpRequest) returns (TopUpResponse);
+   rpc BuyWithBonus (BuyWithBonusRequest) returns (BuyWithBonusResponse);
+   rpc GetOrder (GetOrderRequest) returns (GetOrderResponse);
+}
+
+
+
