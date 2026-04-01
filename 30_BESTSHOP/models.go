@@ -58,7 +58,9 @@ type ShopRepository interface {
 	UpdateStock(productId int, delta int) error
 	CreateOrder(order *Order) error
 	GetOrder(userId int) (*Order, error)
-
+	GetOrders() ([]Order, error)
+	UpdateOrderStatus(orderId int, status string) error
+	CreateProduct(name string, price int, amount int) error
 	// БОНУСЫ
 	GetBonusCard(userId int) (*BonusCards, error)
 	UpdateBonusBalance(userId int, delta int) error

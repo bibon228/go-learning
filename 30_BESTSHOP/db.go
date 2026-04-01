@@ -141,3 +141,27 @@ func (r *PostgresRepo) GetBankById(bankId int) (*Bank, error) {
 
 	return &bank, err
 }
+func (r *PostgresRepo) CreateProduct(name string, price int, amount int) error {
+	_, err := r.db.Exec("INSERT INTO products (name, price, amount) VALUES ($1, $2, $3)", name, price, amount)
+	return err
+}
+func (r *PostgresRepo) GetOrders() ([]Order, error) {
+	var orders []Order
+	rows, err := r.db.Query("SELECT id, user_id, product_id, amount, price, used_bonuses, status FROM orders")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var order Order
+		err = rows.Scan(&order.ID, &order.UserID, &order.ProductID, &order.Amount, &order.Price, &order.UsedBonuses, &order.Status)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, order)
+	}
+	return orders, nil
+}
+func (r *PostgresRepo) UpdateOrderStatus(orderId int, status string) error {
+	_, err := r.db.Exec("UPDATE orders SET status = $1 WHERE id = $2", status, orderId)
+	return err
+}

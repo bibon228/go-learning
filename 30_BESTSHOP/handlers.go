@@ -9,392 +9,341 @@ import (
 	"time"
 )
 
-func handleCreateUser(w http.ResponseWriter, r *http.Request) {
-	var u Users
-	err := json.NewDecoder(r.Body).Decode(&u)
-	if err != nil {
-		log.Println("Не удалось прочитать ID пользователя", err)
-		return
-	}
-	err = db.QueryRow("INSERT INTO users (name) VALUES ($1) RETURNING id", u.Name).Scan(&u.ID)
-	if err != nil {
-		log.Println("Ошибка при создании пользователя", err)
-		return
-	}
-	var bank Bank
-	err = db.QueryRow("INSERT INTO banks (user_id) VALUES ($1) RETURNING id", u.ID).Scan(&bank.ID)
-	if err != nil {
-		log.Println("Не удалось создать аккаунт", err)
-		return
-	}
-	_, err = db.Exec("INSERT INTO bonuscards (user_id, balance, status) VALUES ($1, 0, 'True')", u.ID)
-	if err != nil {
-		log.Println("Не удалось создать бонусную карту", err)
+type HttpHandler struct {
+	Repo ShopRepository
+}
 
+func (h *HttpHandler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var u Users
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+		log.Println("Не удалось прочитать запрос", err)
+		return
 	}
-	bank.UserID = u.ID
-	bank.BalanceRub = 0
-	bank.BalanceUsd = 0
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(bank)
+
+	userId, err := h.Repo.CreateUser(u.Name)
+	if err != nil {
+		log.Println("Не удалось создать пользователя", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
+		return
+	}
+	bankId, err := h.Repo.CreateBank(userId)
+	if err != nil {
+		log.Println("Не удалось создать банк", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "Пользователь создан с id %d и банк с id %d", userId, bankId)
 
 }
-func handleCreateCard(w http.ResponseWriter, r *http.Request) {
-	var request struct {
+func (h *HttpHandler) handleCreateCard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
 		UserID int `json:"user_id"`
 	}
-	err := json.NewDecoder(r.Body).Decode(&request)
-	if err != nil {
-		log.Println("Не удалось прочитать ID пользователя", err)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Println("Не удалось прочитать запрос", err)
 		return
 	}
 	var bankID int
-	if request.UserID == 0 {
-		err = db.QueryRow("INSERT INTO banks DEFAULT VALUES RETURNING id").Scan(&bankID)
+	var err error
+	if req.UserID == 0 {
+		bankID, err = h.Repo.CreateBank(0)
 		if err != nil {
-			log.Println("Не удалось создать счет", err)
+			log.Println("Не удалось создать банк", err)
+			http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 			return
 		}
 	} else {
-		err = db.QueryRow("SELECT id FROM banks WHERE user_id = $1", request.UserID).Scan(&bankID)
+		bankID, err = h.Repo.GetBankByUserId(req.UserID)
 		if err != nil {
-			log.Println("Не удалось найти счет", err)
+			http.Error(w, "Не удалось найти банк", http.StatusInternalServerError)
 			return
 		}
 	}
-	var card Cards
 	cardNumber := fmt.Sprintf("%016d", rand.Int63n(1e16))
-	err = db.QueryRow("INSERT INTO cards (bank_id, number) VALUES ($1, $2) RETURNING id", bankID, cardNumber).Scan(&card.ID)
+	cardID, err := h.Repo.CreateCard(bankID, cardNumber)
 	if err != nil {
-		log.Println("Не удалось выдать карту", err)
+		log.Println("Не удалось создать карту", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	card.BankID = bankID
-	card.Number = cardNumber
-
-	json.NewEncoder(w).Encode(card)
+	fmt.Fprintf(w, "Карта создана с id %d", cardID)
 
 }
 
-func handleTopUp(w http.ResponseWriter, r *http.Request) {
-	var request struct {
+func (h *HttpHandler) handleTopUp(w http.ResponseWriter, r *http.Request) {
+	var req struct {
 		CardID int    `json:"card_id"`
 		Amount int    `json:"amount"`
 		Valute string `json:"valute"`
 	}
-	err := json.NewDecoder(r.Body).Decode(&request)
-	if err != nil {
-		log.Println("Не удалось прочитать ID карты", err)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Println("Не удалось прочитать запрос", err)
+		http.Error(w, "Ошибка чтения JSON", http.StatusBadRequest)
 		return
 	}
-	var bankID int
-	err = db.QueryRow("SELECT bank_id FROM cards WHERE id = $1", request.CardID).Scan(&bankID)
+	card, err := h.Repo.GetCard(req.CardID)
 	if err != nil {
-		log.Println("Не удалось найти аккаунт", err)
+		log.Println("Не удалось найти карту", err)
+		http.Error(w, "Карта не найдена", http.StatusNotFound)
 		return
 	}
-	if request.Valute == "RUB" {
-
-		_, err = db.Exec("UPDATE banks SET balance_rub = balance_rub + $1 WHERE id = $2", request.Amount, bankID)
-		if err != nil {
-			log.Println("Не удалось обновить баланс", err)
-			return
-		}
-	} else if request.Valute == "USD" {
-		amount := request.Amount / 90
-		_, err = db.Exec("UPDATE banks SET balance_usd = balance_usd + $1 WHERE id = $2", amount, bankID)
-		if err != nil {
-			log.Println("Не удалось обновить баланс", err)
-			return
-		}
+	// 3. Выполняем бизнес-логику пополнения в зависимости от валюты
+	if req.Valute == "RUB" {
+		err = h.Repo.UpdateBalance(card.BankID, req.Amount, "RUB")
+	} else if req.Valute == "USD" {
+		amountUsd := req.Amount / 90 // конвертируем
+		err = h.Repo.UpdateBalance(card.BankID, amountUsd, "USD")
+	} else {
+		http.Error(w, "Неизвестная валюта", http.StatusBadRequest)
+		return
 	}
+	if err != nil {
+		log.Println("Не удалось пополнить баланс", err)
+		http.Error(w, "Ошибка при пополнении", http.StatusInternalServerError)
+		return
+	}
+	// 4. Успешный ответ
+	fmt.Fprintf(w, "Баланс карты успешно пополнен на %d %s", req.Amount, req.Valute)
 
-	fmt.Fprintf(w, "Баланс карты %d успешно пополнен на %d\n", request.CardID, request.Amount)
 }
-func handleLinkCard(w http.ResponseWriter, r *http.Request) {
-	var request struct {
+
+func (h *HttpHandler) handleLinkCard(w http.ResponseWriter, r *http.Request) {
+	var req struct {
 		UserID int `json:"user_id"`
 		CardID int `json:"card_id"`
 	}
-	err := json.NewDecoder(r.Body).Decode(&request)
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		log.Println("Не удалось прочитать ID пользователя", err)
+		log.Println("Не удалось прочитать запрос", err)
 		return
 	}
-	var userBankID int
-	err = db.QueryRow("SELECT id FROM banks WHERE user_id = $1", request.UserID).Scan(&userBankID)
+	oldBank, err := h.Repo.GetBankById(req.CardID)
 	if err != nil {
-		log.Println("Не удалось найти банковский счет", err)
+		log.Println("Не удалось найти банк", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	var cardBankID int
-	err = db.QueryRow("SELECT bank_id FROM cards WHERE id = $1", request.CardID).Scan(&cardBankID)
+	if oldBank.UserID != 0 {
+		http.Error(w, "Карта уже привязана к другому пользователю!", http.StatusInternalServerError)
+		return
+	}
+	userBankID, err := h.Repo.GetBankByUserId(req.UserID)
 	if err != nil {
-		log.Println("Не удалось найти банковский счет карты", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	var cardUserID *int
-	err = db.QueryRow("SELECT user_id FROM banks WHERE id = $1", cardBankID).Scan(&cardUserID)
+	err = h.Repo.UpdateCardBank(req.CardID, userBankID)
 	if err != nil {
-		log.Println("Не удалось найти пользователя", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	if cardUserID != nil {
-		fmt.Fprintf(w, "Карта %d уже привязана к другому пользователю", request.CardID)
-		return
+	if oldBank.BalanceRub > 0 {
+		h.Repo.UpdateBalance(userBankID, oldBank.BalanceRub, "RUB")
+		h.Repo.UpdateBalance(oldBank.ID, -oldBank.BalanceRub, "RUB")
 	}
-	err = db.QueryRow("UPDATE cards SET bank_id = $1 WHERE id = $2 RETURNING id", userBankID, request.CardID).Scan(&request.CardID)
-	if err != nil {
-		log.Println("Не удалось привязать карту", err)
-		return
+	if oldBank.BalanceUsd > 0 {
+		h.Repo.UpdateBalance(userBankID, oldBank.BalanceUsd, "USD")
+		h.Repo.UpdateBalance(oldBank.ID, -oldBank.BalanceUsd, "USD")
 	}
-	fmt.Fprintf(w, "Карта %d успешно привязана к пользователю %d", request.CardID, request.UserID)
+	fmt.Fprintf(w, "Карта привязана к банку с id %d", userBankID)
 
-	var balance_rub int
-	var balance_usd int
-	err = db.QueryRow("SELECT balance_rub, balance_usd FROM banks WHERE id = $1", cardBankID).Scan(&balance_rub, &balance_usd)
-	if err != nil {
-		log.Println("Не удалось найти баланс", err)
-		return
-	}
-	_, err = db.Exec("UPDATE banks SET balance_rub = balance_rub + $1, balance_usd = balance_usd + $2 WHERE id = $3", balance_rub, balance_usd, userBankID)
-	if err != nil {
-		log.Println("Не удалось обновить баланс", err)
-		return
-	}
-	_, err = db.Exec("UPDATE banks SET balance_rub = 0, balance_usd = 0 WHERE id = $1", cardBankID)
-	if err != nil {
-		log.Println("Не удалось обнулить баланс", err)
-		return
-	}
 }
 
-func handleCreateProduct(w http.ResponseWriter, r *http.Request) {
-	var p Products
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+func (h *HttpHandler) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name   string `json:"name"`
+		Price  int    `json:"price"`
+		Amount int    `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Println("Не удалось прочитать запрос", err)
 		return
 	}
-	_, err := db.Exec("INSERT INTO products (name, price, amount) VALUES ($1, $2, $3)", p.Name, p.Price, p.Amount)
+	err := h.Repo.CreateProduct(req.Name, req.Price, req.Amount)
 	if err != nil {
-		log.Println("Ошибка при создании продукта", err)
+		log.Println("Не удалось создать продукт", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	fmt.Fprintf(w, "Продукт %s успешно создан!", p.Name)
+	fmt.Fprintf(w, "Продукт создан")
+
 }
-func handleBuyProduct(w http.ResponseWriter, r *http.Request) {
-	var request struct {
+
+func (h *HttpHandler) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
+	var req struct {
 		UserID    int `json:"user_id"`
 		ProductID int `json:"product_id"`
 		Amount    int `json:"amount"`
 	}
-	err := json.NewDecoder(r.Body).Decode(&request)
-	if err != nil {
-		log.Println("Не удалось прочитать ID пользователя", err)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Println("Не удалось прочитать запрос", err)
 		return
 	}
-	var product Products
-	err = db.QueryRow("SELECT * FROM products WHERE id = $1", request.ProductID).Scan(&product.ID, &product.Name, &product.Price, &product.Amount)
+	product, err := h.Repo.GetProduct(req.ProductID)
 	if err != nil {
 		log.Println("Не удалось найти продукт", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	if product.Amount < request.Amount {
-		fmt.Fprintf(w, "Недостаточно товара на складе")
+	if product.Amount < req.Amount {
+		http.Error(w, "Недостаточно товара на складе", http.StatusBadRequest)
 		return
 	}
-	var userBankID int
-	err = db.QueryRow("SELECT id FROM banks WHERE user_id = $1", request.UserID).Scan(&userBankID)
+	bankID, err := h.Repo.GetBankByUserId(req.UserID)
 	if err != nil {
-		log.Println("Не удалось найти банковский счет", err)
+		http.Error(w, "Не удалось найти банк", http.StatusInternalServerError)
 		return
 	}
-	var balance_rub int
-	err = db.QueryRow("SELECT balance_rub FROM banks WHERE id = $1", userBankID).Scan(&balance_rub)
+	balanceRub, err := h.Repo.GetBalance(bankID, "RUB")
 	if err != nil {
-		log.Println("Не удалось найти баланс", err)
+		http.Error(w, "Не удалось найти баланс", http.StatusInternalServerError)
 		return
 	}
-	if balance_rub < product.Price*request.Amount {
-		fmt.Fprintf(w, "Недостаточно средств на балансе")
+	if balanceRub < product.Price*req.Amount {
+		http.Error(w, "Недостаточно средств на балансе", http.StatusBadRequest)
 		return
 	}
-	_, err = db.Exec("UPDATE banks SET balance_rub = balance_rub - $1 WHERE id = $2", product.Price*request.Amount, userBankID)
+	err = h.Repo.UpdateBalance(bankID, -product.Price*req.Amount, "RUB")
 	if err != nil {
-		log.Println("Не удалось обновить баланс", err)
+		http.Error(w, "Не удалось обновить баланс", http.StatusInternalServerError)
 		return
 	}
-	_, err = db.Exec("UPDATE products SET amount = amount - $1 WHERE id = $2", request.Amount, request.ProductID)
+	err = h.Repo.UpdateStock(req.ProductID, req.Amount)
 	if err != nil {
-		log.Println("Не удалось обновить количество товара", err)
+		http.Error(w, "Не удалось обновить остаток", http.StatusInternalServerError)
 		return
 	}
-	var bonus int
-	if product.Price*request.Amount < 1000 {
-		bonus = product.Price * request.Amount / 200
-		_, err = db.Exec("UPDATE bonuscards SET balance = balance + $1 WHERE user_id = $2", bonus, request.UserID)
-	} else {
-		bonus = product.Price * request.Amount / 100
-		_, err = db.Exec("UPDATE bonuscards SET balance = balance + $1 WHERE user_id = $2", bonus, request.UserID)
-	}
+	bonus := (product.Price * req.Amount) / 100
+	err = h.Repo.UpdateBonusBalance(req.UserID, bonus)
 	if err != nil {
-		log.Println("Не удалось обновить баланс", err)
+		http.Error(w, "Не удалось начислить бонусы", http.StatusInternalServerError)
 		return
 	}
-	var order Order
-	order.UserID = request.UserID
-	order.ProductID = request.ProductID
-	order.Amount = request.Amount
-	order.Price = product.Price * request.Amount
-	order.UsedBonuses = 0
-	order.Status = "paid"
-	_, err = db.Exec("INSERT INTO orders (user_id, product_id, amount, price, used_bonuses, status) VALUES ($1, $2, $3, $4, $5, $6)", order.UserID, order.ProductID, order.Amount, order.Price, order.UsedBonuses, order.Status)
+	err = h.Repo.CreateOrder(&Order{
+		UserID:      req.UserID,
+		ProductID:   req.ProductID,
+		Amount:      req.Amount,
+		Price:       product.Price * req.Amount,
+		UsedBonuses: bonus,
+		Status:      "completed",
+	})
 	if err != nil {
-		log.Println("Не удалось создать заказ", err)
+		http.Error(w, "Не удалось создать заказ", http.StatusInternalServerError)
 		return
 	}
-	fmt.Fprintf(w, "Товар %s успешно куплен!", product.Name)
+	fmt.Fprintf(w, "Заказ успешно создан")
 
 }
 
-func autoUpdateOrders() {
-	var order Order
+func (h *HttpHandler) autoUpdateOrders() {
+	log.Println("Воркер автообновления заказов запущен...")
 	for {
 		time.Sleep(1 * time.Minute)
-		rows, err := db.Query("SELECT id, user_id, product_id, amount, price, used_bonuses, status FROM orders WHERE status = 'paid'")
+
+		orders, err := h.Repo.GetOrders()
 		if err != nil {
-			log.Println("Не удалось найти заказы", err)
+			log.Println("Ошибка при получении заказов:", err)
 			continue
 		}
-		for rows.Next() {
-			err = rows.Scan(&order.ID, &order.UserID, &order.ProductID, &order.Amount, &order.Price, &order.UsedBonuses, &order.Status)
-			if err != nil {
-				log.Println("Не удалось прочитать заказ", err)
-				continue
-
-			}
+		for _, order := range orders {
 			if order.Status == "paid" {
-				order.Status = "completed"
-				_, err := db.Exec("UPDATE orders SET status = $1 WHERE id = $2", order.Status, order.ID)
+				err = h.Repo.UpdateOrderStatus(order.ID, "completed")
 				if err != nil {
-					log.Println("Не удалось обновить статус заказа", err)
-					return
+					log.Println("Ошибка при обновлении статуса заказа:", err)
+					continue
 				}
-				_, err = db.Exec("UPDATE bonuscards SET status = 'True' WHERE user_id = $1", order.UserID)
-				if err != nil {
-					log.Println("Не удалось обновить статус", err)
-					return
-				}
-				_, err = db.Exec("UPDATE bonuscards SET balance = balance - $1 WHERE user_id = $2", order.UsedBonuses, order.UserID)
-				if err != nil {
-					log.Println("Не удалось обновить баланс", err)
-					return
-				}
+				log.Printf("Заказ %d успешно доставлен клиенту %d!", order.ID, order.UserID)
 			}
 		}
-		rows.Close()
 	}
-
 }
-func handleBuyWithBonus(w http.ResponseWriter, r *http.Request) {
-	var request struct {
+func (h *HttpHandler) handleBuyWithBonus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
 		UserID    int `json:"user_id"`
 		ProductID int `json:"product_id"`
 		Amount    int `json:"amount"`
 	}
-	err := json.NewDecoder(r.Body).Decode(&request)
-	if err != nil {
-		log.Println("Не удалось прочитать ID пользователя", err)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Println("Не удалось прочитать запрос", err)
 		return
 	}
-	var product Products
-	err = db.QueryRow("SELECT * FROM products WHERE id = $1", request.ProductID).Scan(&product.ID, &product.Name, &product.Price, &product.Amount)
+	product, err := h.Repo.GetProduct(req.ProductID)
 	if err != nil {
 		log.Println("Не удалось найти продукт", err)
+		http.Error(w, "Ошибка на сервере", http.StatusInternalServerError)
 		return
 	}
-	if product.Amount < request.Amount {
-		fmt.Fprintf(w, "Недостаточно товара на складе")
+	if product.Amount < req.Amount {
+		http.Error(w, "Недостаточно товара на складе", http.StatusBadRequest)
 		return
 	}
-	var userBankID int
-	err = db.QueryRow("SELECT id FROM banks WHERE user_id = $1", request.UserID).Scan(&userBankID)
+	bankID, err := h.Repo.GetBankByUserId(req.UserID)
 	if err != nil {
-		log.Println("Не удалось найти банковский счет", err)
+		http.Error(w, "Не удалось найти банк", http.StatusInternalServerError)
 		return
 	}
-	var balance_rub int
-	err = db.QueryRow("SELECT balance_rub FROM banks WHERE id = $1", userBankID).Scan(&balance_rub)
+	balanceRub, err := h.Repo.GetBalance(bankID, "RUB")
 	if err != nil {
-		log.Println("Не удалось найти баланс", err)
+		http.Error(w, "Не удалось найти баланс", http.StatusInternalServerError)
 		return
 	}
-	var bonusBalance int
-	err = db.QueryRow("SELECT balance FROM bonuscards WHERE user_id = $1", request.UserID).Scan(&bonusBalance)
+	bonusCard, err := h.Repo.GetBonusCard(req.UserID)
 	if err != nil {
-		log.Println("Не удалось найти баланс", err)
+		http.Error(w, "Не удалось найти бонусную карту", http.StatusInternalServerError)
 		return
 	}
-
-	var bonusStatus string
-	err = db.QueryRow("SELECT status FROM bonuscards WHERE user_id = $1", request.UserID).Scan(&bonusStatus)
-	if bonusStatus == "False" {
-		fmt.Fprintf(w, "У вас уже есть активный заказ с бонусами")
+	if bonusCard.Status == "False" {
+		http.Error(w, "У вас уже есть активный заказ с бонусами", http.StatusBadRequest)
 		return
 	}
-	if bonusStatus == "True" {
-		if bonusBalance > product.Price*request.Amount {
-			bonusBalance = product.Price * request.Amount
+	if bonusCard.Status == "True" {
+		if bonusCard.BonusBalance > product.Price*req.Amount {
+			bonusCard.BonusBalance = product.Price * req.Amount
 		}
-		needMoney := product.Price*request.Amount - bonusBalance
-		if balance_rub < needMoney {
-			fmt.Fprintf(w, "Недостаточно средств на балансе")
+		needMoney := product.Price*req.Amount - bonusCard.BonusBalance
+		if balanceRub < needMoney {
+			http.Error(w, "Недостаточно средств на балансе", http.StatusBadRequest)
 			return
 		}
-
-		balance := balance_rub - needMoney
-		_, err = db.Exec("UPDATE banks SET balance_rub = $1 WHERE id = $2", balance, userBankID)
+		err = h.Repo.UpdateBalance(bankID, -needMoney, "RUB")
 		if err != nil {
-			log.Println("Не удалось обновить баланс", err)
+			http.Error(w, "Не удалось обновить баланс", http.StatusInternalServerError)
 			return
 		}
-		_, err = db.Exec("UPDATE products SET amount = amount - $1 WHERE id = $2", request.Amount, request.ProductID)
+		err = h.Repo.UpdateBonusBalance(req.UserID, -bonusCard.BonusBalance)
 		if err != nil {
-			log.Println("Не удалось обновить количество товара", err)
+			http.Error(w, "Не удалось обновить баланс", http.StatusInternalServerError)
 			return
 		}
-		var bonus int
-		if product.Price*request.Amount < 1000 {
-			bonus = product.Price * request.Amount / 200
-			_, err = db.Exec("UPDATE bonuscards SET balance = balance + $1 WHERE user_id = $2", bonus, request.UserID)
-		} else {
-			bonus = product.Price * request.Amount / 100
-			_, err = db.Exec("UPDATE bonuscards SET balance = balance + $1 WHERE user_id = $2", bonus, request.UserID)
-		}
+		err = h.Repo.SetBonusStatus(req.UserID, "False")
 		if err != nil {
-			log.Println("Не удалось обновить баланс", err)
+			http.Error(w, "Не удалось обновить статус карты", http.StatusInternalServerError)
 			return
 		}
-		var order Order
-		order.UserID = request.UserID
-		order.ProductID = request.ProductID
-		order.Amount = request.Amount
-		order.Price = product.Price * request.Amount
-		order.UsedBonuses = bonusBalance
-		order.Status = "paid"
-		_, err = db.Exec("INSERT INTO orders (user_id, product_id, amount, price, used_bonuses, status) VALUES ($1, $2, $3, $4, $5, $6)", order.UserID, order.ProductID, order.Amount, order.Price, order.UsedBonuses, order.Status)
-		if err != nil {
-			log.Println("Не удалось создать заказ", err)
-			return
-		}
-		_, err = db.Exec("UPDATE bonuscards SET status = 'False' WHERE user_id = $1", request.UserID)
-		if err != nil {
-			log.Println("Ошибка при обновлении статуса бонусов", err)
-			return
-		}
-
-		fmt.Fprintf(w, "Товар %s успешно куплен!", product.Name)
-
 	}
+	err = h.Repo.UpdateStock(req.ProductID, req.Amount)
+	if err != nil {
+		http.Error(w, "Не удалось обновить остаток", http.StatusInternalServerError)
+		return
+	}
+	bonus := (product.Price * req.Amount) / 100
+	err = h.Repo.UpdateBonusBalance(req.UserID, bonus)
+	if err != nil {
+		http.Error(w, "Не удалось начислить бонусы", http.StatusInternalServerError)
+		return
+	}
+	err = h.Repo.CreateOrder(&Order{
+		UserID:      req.UserID,
+		ProductID:   req.ProductID,
+		Amount:      req.Amount,
+		Price:       product.Price * req.Amount,
+		UsedBonuses: bonusCard.BonusBalance,
+		Status:      "paid",
+	})
+	if err != nil {
+		http.Error(w, "Не удалось создать заказ", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "Заказ успешно создан")
 
 }
