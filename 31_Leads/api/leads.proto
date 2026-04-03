@@ -1,0 +1,61 @@
+syntax = "proto3";
+package lead;
+option go_package = "leads/pb";
+
+message Lead {
+    string id = 1;
+    string name = 2;
+    string phone = 3;
+    string email = 4;
+    string source = 5;
+    string status = 6;
+    string created_at = 7;
+    string updated_at = 8;
+}
+
+message CreateLeadRequest {
+    string name = 1;
+    string phone = 2;
+    string email = 3;
+    string source = 4;
+}
+
+message CreateLeadResponse {
+    string id = 1;
+    string status = 2;
+}
+
+message GetLeadRequest {
+    string id = 1;
+}
+
+message GetLeadResponse {
+    Lead lead = 1;
+}
+
+message UpdateLeadStatusRequest {
+    string id = 1;
+    string status = 2;
+}
+
+message UpdateLeadStatusResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ListLeadsRequest {
+    string status = 1;
+    string source = 2;
+    int32 limit = 3;
+}
+
+message ListLeadsResponse {
+    repeated Lead leads = 1;
+}
+
+service LeadService {
+    rpc CreateLead(CreateLeadRequest) returns (CreateLeadResponse);
+    rpc GetLead(GetLeadRequest) returns (GetLeadResponse);
+    rpc UpdateLeadStatus(UpdateLeadStatusRequest) returns (UpdateLeadStatusResponse);
+    rpc ListLeads(ListLeadsRequest) returns (ListLeadsResponse);
+}
